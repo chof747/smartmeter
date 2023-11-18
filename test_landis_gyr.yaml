@@ -1,0 +1,68 @@
+substitutions:
+  deviceName: landisgyr
+  mqttBroker: 10.0.1.39
+  mqttUser:  switch
+
+external_components:
+- source:
+    type: local
+    path: esphome/components
+#  components: [ landis_gyr]
+
+esphome:
+  name: ${deviceName}
+  platform: ESP8266
+  board: d1_mini
+  build_path: devices/${deviceName}
+
+
+wifi:
+  networks:
+    - ssid: !secret wifi_main_ssid
+      password: !secret wifi_main_passwd
+    - ssid: !secret wifi_aux_ssid
+      password: !secret wifi_aux_passwd
+
+  #use_address: irheaterplug.local
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "${deviceName} Fallback AP"
+    password: !secret fallbackPwd
+
+captive_portal:
+
+# Enable logging
+logger:
+  level: DEBUG
+  logs:
+    sensor: INFO
+    adc: INFO
+    mqtt: INFO
+
+# Enable Home Assistant API
+api:
+
+ota:
+
+web_server:
+  port: 80
+
+mqtt: 
+  broker: ${mqttBroker}
+  username: ${mqttUser}
+  password: !secret mqttPwd
+  discovery: false
+
+sensor:
+  - platform: landis_gyr
+    meter_key: !secret decryptkey
+    max_message_length: 255
+    energy:
+      name: "Energieverbrauch total"
+      
+
+uart:
+  baud_rate: 9600
+  tx_pin: D4
+  rx_pin: RX

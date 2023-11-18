@@ -1,0 +1,67 @@
+import esphome.codegen as cg
+import esphome.config_validation as cv
+from esphome.components import uart, sensor
+from esphome.const import (
+  CONF_ID,
+  CONF_POWER,
+  CONF_ENERGY,
+  STATE_CLASS_MEASUREMENT,
+  STATE_CLASS_TOTAL_INCREASING,
+  UNIT_KILOWATT_HOURS,
+  UNIT_WATT,
+  DEVICE_CLASS_ENERGY,
+  DEVICE_CLASS_POWER
+)
+
+DEPENDENCIES = [ 'uart' ]
+SMART_METER_DECRYPTION_KEY = 'meter_key'
+MAX_MESSAGE_LENGTH = 'max_message_length'
+
+SENSOR_BEGIN_POS = 'begin_pos'
+
+landisGyr_ns = cg.esphome_ns.namespace("landis_gyr")
+LandisGyrComponent = landisGyr_ns.class_("LandysGyrReader", cg.Component, uart.UARTDevice)
+
+CONFIG_SCHEMA = (
+  cv.Schema(
+    {
+      cv.GenerateID(): cv.declare_id(LandisGyrComponent),
+      cv.Required(SMART_METER_DECRYPTION_KEY): cv.string,
+      cv.Optional(MAX_MESSAGE_LENGTH, 80): cv.int_, 
+
+      cv.Optional(CONF_ENERGY): sensor.sensor_schema(
+        unit_of_measurement=UNIT_KILOWATT_HOURS,
+        accuracy_decimals=3,
+        device_class=DEVICE_CLASS_ENERGY,
+        state_class=STATE_CLASS_TOTAL_INCREASING
+      ),
+      cv.Optional(CONF_POWER): sensor.sensor_schema(
+        unit_of_measurement=UNIT_WATT,
+        accuracy_decimals=0,
+        device_class=DEVICE_CLASS_POWER,
+        state_class=STATE_CLASS_MEASUREMENT
+      )
+    }
+  )
+  .extend(cv.COMPONENT_SCHEMA)
+  .extend(uart.UART_DEVICE_SCHEMA)
+)
+
+async def to_code(config):
+  var = cg.new_Pvariable(config[CONF_ID])
+  await cg.register_component(var, config)
+  await uart.register_uart_device(var, config)
+
+  if (CONF_ENERGY in config):
+    sens = await sensor.new_sensor(config[CONF_ENERGY])
+    cg.add(var.set_energy_sensor(sens))
+
+  if (CONF_POWER in config):
+    sens = await sensor.new_sensor(config[CONF_POWER])
+    cg.add(var.set_power_sensor(sens))
+
+  if (SMART_METER_DECRYPTION_KEY in config):
+    cg.add(var.set_smartmeter_decryption_key(config[SMART_METER_DECRYPTION_KEY]))
+
+  if (MAX_MESSAGE_LENGTH in config):
+    cg.add(var.set_max_message_length(config[MAX_MESSAGE_LENGTH]))
