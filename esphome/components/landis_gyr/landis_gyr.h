@@ -21,7 +21,9 @@ namespace esphome
     const uint8_t CIPHER_LENGTH = 76;
     const uint8_t IV_LENGTH = 12;
     const uint8_t TAIL_LENGTH = 12;
-  
+    const uint8_t ENERGY_CONSUMPTION_TOTAL_START = 35;
+    const uint8_t CURRENT_POWER_USAGE_START = ENERGY_CONSUMPTION_TOTAL_START + 20;
+    
     struct ParseContext
     {
       char iv[IV_LENGTH];
@@ -29,10 +31,11 @@ namespace esphome
       uint32_t frameid;
       char tail[TAIL_LENGTH];
       size_t cipherStart;
+      size_t cipherEnd;
     };
     
     const ParseContext EMPTY_CONTEXT = (struct ParseContext) {
-      "", false, 0, "", 0
+      "", false, 0, "", 0, 0
     };
 
     class LandysGyrReader : public Component, public UARTDevice
@@ -61,8 +64,12 @@ namespace esphome
       bool parseDecryptionKey(const std::string key);
       void deleteMessage();
 
-      bool parseMessage(size_t len);
-      void logMessage(size_t len, size_t begin = 0);
+      float readValue(esphome::sensor::Sensor *sensor, uint8_t pos, float factor, const char* sensor_name = "");
+      float readValue(esphome::sensor::Sensor *sensor, uint8_t pos, float factor, float offset, const char* sensor_name = "");
+      float parseMessage();
+      bool decryptCypher();
+      bool validateMessage();
+      void logMessage(size_t len, size_t begin = 0, bool debug=false);
       void logContext();
 
       size_t pos_=0;

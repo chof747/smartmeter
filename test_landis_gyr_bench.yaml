@@ -1,5 +1,5 @@
 substitutions:
-  deviceName: landisgyr
+  deviceName: landisgyr_test
   mqttBroker: 10.0.1.39
   mqttUser:  switch
 

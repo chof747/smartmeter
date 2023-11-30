@@ -1,5 +1,8 @@
 #include "landis_gyr.h"
 #include "esphome/core/log.h"
+#include <Crypto.h>
+#include <AES.h>
+#include <GCM.h>
 
 using namespace esphome::landis_gyr;
 
@@ -9,19 +12,55 @@ static const char *const TAG = "landys_gyr";
   ESP_LOGI(TAG, "Disabling decryption"); \
   return;
 
+uint32_t bigToLittleEndian(uint32_t value)
+{
+  return ((value & 0xFF) << 24) |
+         (((value >> 8) & 0xFF) << 16) |
+         (((value >> 16) & 0xFF) << 8) |
+         ((value >> 24) & 0xFF);
+}
+
 void LandysGyrReader::setup()
 //***************************************************************************************
 {
   this->message_ = new char[this->max_message_len_];
 }
+/*
+void LandysGyrReader::loop()
+{
+ int block = 0, beg = 0;
+
+  while ((block = available()))
+  {
+     for (int i = 0; i < block; ++i)
+    {
+      uint8_t b = read();
+      yield();
+
+      if (0xdb == b)
+      {
+        if (pos_>0)
+        {
+          ESP_LOGD(TAG, "Message ==========================");
+          logMessage(pos_);
+        }
+
+        pos_ = 0;
+      }
+
+      message_[pos_++] = b;
+
+      pos_ = (pos_ >= max_message_len_) ? 0 : pos_;
+    }
+  }
+}
+*/
 
 void LandysGyrReader::loop()
 //***************************************************************************************
 {
-  static bool reading_frame = false;
-
-  int block = 0, beg = 0;
-  pos_ = 0;
+  int block = 0;
+  static int beg;
 
   while ((block = available()))
   {
@@ -37,6 +76,9 @@ void LandysGyrReader::loop()
         {
           ctx_ = EMPTY_CONTEXT;
           state_ = ParseState::SYSNAME_SIZE;
+          pos_ = 0;
+          beg = 0;
+          for(i=0;i<max_message_len_;++i) message_[i] = 0;
           ESP_LOGV(TAG, "STEP00: Started Reading a telegram!");
         }
         break;
@@ -58,7 +100,7 @@ void LandysGyrReader::loop()
         if (pos_ == next_parse_pos_)
         {
           memcpy(ctx_.iv, message_ + beg, pos_ - beg);
-          ctx_.iv[pos_ - beg] = b; //we are at the position of the last byte so add it extra
+          ctx_.iv[pos_ - beg] = b; // we are at the position of the last byte so add it extra
           state_ = ParseState::FRAMETYPE;
         }
         ESP_LOGV(TAG, "STEP02: System Name Read!");
@@ -82,14 +124,14 @@ void LandysGyrReader::loop()
         state_ = ParseState::FRAMEID;
         next_parse_pos_ = pos_ + FRAMEID_LENGTH;
         beg = pos_ + 1;
-        ESP_LOGV(TAG, "STEP03: Secflag = %d", ctx_.secFlg);
+        ESP_LOGV(TAG, "STEP04: Secflag = %d", ctx_.secFlg);
         break;
 
       case ParseState::FRAMEID:
         if (pos_ == next_parse_pos_)
         {
           memcpy(&ctx_.frameid, message_ + beg, FRAMEID_LENGTH);
-          char* ls = reinterpret_cast<char*>(&ctx_.frameid) + 3;
+          char *ls = reinterpret_cast<char *>(&ctx_.frameid) + 3;
           memcpy(ls, &b, 1);
 
           memcpy(ctx_.iv + 8, &ctx_.frameid, FRAMEID_LENGTH);
@@ -97,7 +139,7 @@ void LandysGyrReader::loop()
           next_parse_pos_ = pos_ + CIPHER_LENGTH;
           ctx_.cipherStart = pos_ + 1;
           state_ = ParseState::CIPHER;
-          ESP_LOGV(TAG, "STEP03: FrameID = %d", ctx_.frameid);
+          ESP_LOGV(TAG, "STEP05: FrameID = %u", ctx_.frameid);
         }
         break;
 
@@ -107,6 +149,8 @@ void LandysGyrReader::loop()
           state_ = ParseState::TAIL;
           next_parse_pos_ = pos_ + TAIL_LENGTH;
           beg = pos_ + 1;
+          ctx_.cipherEnd = beg;
+          ESP_LOGV(TAG, "STEP06: Cypher from %u to %u", ctx_.cipherStart, ctx_.cipherEnd);
         }
         break;
 
@@ -114,8 +158,9 @@ void LandysGyrReader::loop()
         if (pos_ == next_parse_pos_)
         {
           memcpy(ctx_.tail, message_ + beg, pos_ - beg);
-          ctx_.tail[pos_ - beg] = b; //we are at the position of the last byte so add it extra
+          ctx_.tail[pos_ - beg] = b; // we are at the position of the last byte so add it extra
           state_ = ParseState::COMPLETE;
+          ESP_LOGV(TAG, "STEP07: Tail read");
         }
         break;
 
@@ -128,7 +173,27 @@ void LandysGyrReader::loop()
         }
         logContext();
         state_ = ParseState::NONE;
-        break;
+        ESP_LOGV(TAG, "STEP08: All loaded");
+        ESP_LOGD(TAG, "Encrypted message: ============");
+          logMessage(pos_, 0, true);
+
+        decryptCypher();
+        {
+          if (!validateMessage())
+          {
+            state_ = ParseState::ERROR;
+            break;
+          }
+          float econsumed = parseMessage();
+          ESP_LOGD(TAG, "Read frameID: %u energy = %.2f", bigToLittleEndian(ctx_.frameid), econsumed);
+          ESP_LOGD(TAG, "Correct message: ============");
+          logMessage(pos_, 0, true);
+          break;
+        }
+
+      case ParseState::ERROR:
+        // should net be reached
+        continue;
 
       default:
         return;
@@ -136,10 +201,11 @@ void LandysGyrReader::loop()
 
       ESP_LOGV(TAG, "State: %d, Byte: %02x", state_, b);
 
-
       if (ParseState::ERROR == state_)
       {
         state_ = ParseState::NONE;
+        ESP_LOGD(TAG, "Wrong message: ============");
+        logMessage(pos_,0,true);
         pos_ = 0;
       }
       else if (ParseState::NONE != state_)
@@ -147,12 +213,6 @@ void LandysGyrReader::loop()
         message_[pos_++] = b;
       }
     }
-
-    ESP_LOGD(TAG, "Block size = %d", block);
-  }
-  if (pos_ > 0)
-  {
-    logMessage(pos_);
   }
 }
 
@@ -219,15 +279,111 @@ inline void LandysGyrReader::deleteMessage()
   this->message_ = nullptr;
 }
 
-bool LandysGyrReader::parseMessage(size_t len)
+bool LandysGyrReader::decryptCypher()
 //***************************************************************************************
 {
-  logMessage(len);
-
-  return false;
+  GCM<AES128> *gcmaes128 = 0;
+  gcmaes128 = new GCM<AES128>();
+  gcmaes128->setKey(decryption_key_.data(), decryption_key_.size());
+  gcmaes128->setIV((const uint8_t *)ctx_.iv, IV_LENGTH);
+  gcmaes128->decrypt((uint8_t *)(message_ + ctx_.cipherStart), (uint8_t *)(message_ + ctx_.cipherStart), ctx_.cipherEnd - ctx_.cipherStart);
+  delete gcmaes128;
+  return true;
 }
 
-void LandysGyrReader::logMessage(size_t len, size_t begin)
+bool LandysGyrReader::validateMessage()
+//***************************************************************************************
+{
+  char *p = message_ + ctx_.cipherStart;
+  char *nextp = p;
+
+  // check if byte 2 - 5 of the cipher are equal to the frame id
+  p++;
+  uint32_t decrypted_frame_id;
+  std::memcpy(&decrypted_frame_id, p, sizeof(uint32_t));
+  yield();
+
+  if (ctx_.frameid != decrypted_frame_id)
+  {
+    ESP_LOGE(TAG, "Decrypted message has the wrong frame id %04d instead of %04d", decrypted_frame_id, ctx_.frameid);
+    return false;
+  }
+
+  // check if the datetime is present both from position 7 - 18 and from 23 - 34
+  p = p + 5;
+  nextp = p + 12;
+  while (p < nextp)
+  {
+    // ESP_LOGD(TAG, "%02x, %02x", *p, *(p+16));
+    if (std::memcmp(p, p + 16, sizeof(char)) != 0)
+    {
+      ESP_LOGE(TAG, "Date time is not equal at the beginning of the telegram!");
+      return false;
+    }
+    p++;
+    yield();
+  }
+
+  // check if the separators 0x06 are where they should be
+  p += 16;
+
+  for (int i = 0; i < 8; ++i)
+  {
+    if (6 != (*p))
+    {
+      ESP_LOGE(TAG, "Separator before value blog %d is not 0x06!", i);
+      return false;
+    }
+    p += 5;
+    yield();
+  }
+
+  return true;
+}
+
+float LandysGyrReader::readValue(esphome::sensor::Sensor *sensor, uint8_t start, float factor, const char *sensor_name)
+//***************************************************************************************
+{
+  return readValue(sensor, start, factor, 0, sensor_name);
+}
+
+float LandysGyrReader::readValue(esphome::sensor::Sensor *sensor, uint8_t start, float factor, float offset, const char *sensor_name)
+//***************************************************************************************
+{
+  if (nullptr != sensor)
+  {
+    uint32_t sensor_raw;
+    float sensor_value;
+
+    char *p = message_ + ctx_.cipherStart + start;
+    memcpy(&sensor_raw, p, sizeof(uint32_t));
+    sensor_raw = bigToLittleEndian(sensor_raw);
+
+    ESP_LOGV(TAG, "%s raw value: %u", sensor_name, sensor_raw);
+
+    sensor_value = sensor_raw / factor + offset;
+    sensor->publish_state(sensor_value);
+
+    return sensor_value;
+  }
+  else
+  {
+    return 0;
+  }
+}
+
+float LandysGyrReader::parseMessage()
+//***************************************************************************************
+{
+  // logMessage();
+  float result = 0;
+  result = readValue(energy_sensor_, ENERGY_CONSUMPTION_TOTAL_START, 1000.0, "Energy consumption total");
+  readValue(power_sensor_, CURRENT_POWER_USAGE_START, 1.0, "Current Power Usage");
+
+  return result;
+}
+
+void LandysGyrReader::logMessage(size_t len, size_t begin, bool debug)
 //***************************************************************************************
 {
   char row[50];
@@ -239,12 +395,27 @@ void LandysGyrReader::logMessage(size_t len, size_t begin)
 
     if (0 == (i + 1) % 16)
     {
-      ESP_LOGD(TAG, "%04d : %s", f++, row);
+      if (debug)
+      {
+        ESP_LOGD(TAG, "%04d : %s", f++, row);
+      }
+      else
+      {
+        ESP_LOGV(TAG, "%04d : %s", f++, row);
+      }
+
       yield();
     }
   }
 
-  ESP_LOGD(TAG, "%04d : %s", f++, row);
+  if (debug)
+  {
+    ESP_LOGD(TAG, "%04d : %s", f++, row);
+  }
+  else
+  {
+    ESP_LOGV(TAG, "%04d : %s", f++, row);
+  }
 }
 
 void LandysGyrReader::logContext()
@@ -256,13 +427,15 @@ void LandysGyrReader::logContext()
   {
     sprintf(hexstr + ((i % 16) * 3), "%02x ", ctx_.iv[i]);
   }
-  ESP_LOGD(TAG, "IV   = %s", hexstr);
+  ESP_LOGV(TAG, "IV   = %s", hexstr);
+  yield();
 
   for (int i = 0; i < TAIL_LENGTH; ++i)
   {
     sprintf(hexstr + ((i % 16) * 3), "%02x ", ctx_.tail[i]);
   }
-  ESP_LOGD(TAG, "TAIL = %s", hexstr);
+  ESP_LOGV(TAG, "TAIL = %s", hexstr);
+  yield();
 
   logMessage(pos_ - ctx_.cipherStart - TAIL_LENGTH, ctx_.cipherStart);
 }
