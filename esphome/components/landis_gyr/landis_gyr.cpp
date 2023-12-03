@@ -35,7 +35,7 @@ void LandysGyrReader::loop()
      for (int i = 0; i < block; ++i)
     {
       uint8_t b = read();
-      yield();
+      //yield();
 
       if (0xdb == b)
       {
@@ -64,10 +64,11 @@ void LandysGyrReader::loop()
 
   while ((block = available()))
   {
+    ESP_LOGI(TAG, "New block of data at %u", pos_);
     for (int i = 0; i < block; ++i)
     {
       uint8_t b = read();
-      yield();
+      //yield();
 
       switch (state_)
       {
@@ -188,6 +189,7 @@ void LandysGyrReader::loop()
           ESP_LOGD(TAG, "Read frameID: %u energy = %.2f", bigToLittleEndian(ctx_.frameid), econsumed);
           ESP_LOGD(TAG, "Correct message: ============");
           logMessage(pos_, 0, true);
+          //delay(100);
           break;
         }
 
@@ -301,7 +303,7 @@ bool LandysGyrReader::validateMessage()
   p++;
   uint32_t decrypted_frame_id;
   std::memcpy(&decrypted_frame_id, p, sizeof(uint32_t));
-  yield();
+  //yield();
 
   if (ctx_.frameid != decrypted_frame_id)
   {
@@ -321,7 +323,7 @@ bool LandysGyrReader::validateMessage()
       return false;
     }
     p++;
-    yield();
+    //yield();
   }
 
   // check if the separators 0x06 are where they should be
@@ -335,7 +337,7 @@ bool LandysGyrReader::validateMessage()
       return false;
     }
     p += 5;
-    yield();
+    //yield();
   }
 
   return true;
@@ -404,7 +406,7 @@ void LandysGyrReader::logMessage(size_t len, size_t begin, bool debug)
         ESP_LOGV(TAG, "%04d : %s", f++, row);
       }
 
-      yield();
+      //yield();
     }
   }
 
@@ -428,14 +430,14 @@ void LandysGyrReader::logContext()
     sprintf(hexstr + ((i % 16) * 3), "%02x ", ctx_.iv[i]);
   }
   ESP_LOGV(TAG, "IV   = %s", hexstr);
-  yield();
+  //yield();
 
   for (int i = 0; i < TAIL_LENGTH; ++i)
   {
     sprintf(hexstr + ((i % 16) * 3), "%02x ", ctx_.tail[i]);
   }
   ESP_LOGV(TAG, "TAIL = %s", hexstr);
-  yield();
+  //yield();
 
   logMessage(pos_ - ctx_.cipherStart - TAIL_LENGTH, ctx_.cipherStart);
 }
