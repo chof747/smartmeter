@@ -18,24 +18,28 @@ namespace esphome
 
     const uint8_t SYSTEM_NAME_MAX_CNT = 8;
     const uint8_t FRAMEID_LENGTH = 4;
-    const uint8_t CIPHER_LENGTH = 76;
+    const uint8_t CIPHER_LENGTH = 75;
     const uint8_t IV_LENGTH = 12;
-    const uint8_t TAIL_LENGTH = 12;
+    const uint8_t HEAD_LENGTH = 10;
+    const uint8_t TAIL_LENGTH = 2;
     const uint8_t ENERGY_CONSUMPTION_TOTAL_START = 35;
     const uint8_t CURRENT_POWER_USAGE_START = ENERGY_CONSUMPTION_TOTAL_START + 20;
-    
+    const uint8_t EXPECTED_TOTAL_MESSAGE_LENGTH = 105; 
+
     struct ParseContext
     {
       char iv[IV_LENGTH];
       bool secFlg;
       uint32_t frameid;
-      char tail[TAIL_LENGTH];
+      uint16_t crc;
       size_t cipherStart;
       size_t cipherEnd;
+      size_t messageLength;
+      size_t telegramStart;
     };
     
     const ParseContext EMPTY_CONTEXT = (struct ParseContext) {
-      "", false, 0, "", 0, 0
+      "", false, 0, 0, 0, 0, 0, 0
     };
 
     class LandysGyrReader : public Component, public UARTDevice
@@ -59,13 +63,15 @@ namespace esphome
       sensor::Sensor *power_sensor_{nullptr};
 
     private:
-      enum ParseState { NONE, SYSNAME_SIZE, SYSNAME, FRAMETYPE, SECFLAG, FRAMEID, CIPHER, TAIL, COMPLETE, ERROR};
+      enum ParseState { NONE, SIZE, TELEGRAM, SYSNAME_SIZE, SYSNAME, FRAMETYPE, SECFLAG, FRAMEID, CIPHER, CRC, COMPLETE, ERROR};
 
       bool parseDecryptionKey(const std::string key);
       void deleteMessage();
 
+      void readSerial();
       float readValue(esphome::sensor::Sensor *sensor, uint8_t pos, float factor, const char* sensor_name = "");
       float readValue(esphome::sensor::Sensor *sensor, uint8_t pos, float factor, float offset, const char* sensor_name = "");
+      void processTelegram();
       float parseMessage();
       bool decryptCypher();
       bool validateMessage();

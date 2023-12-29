@@ -40,7 +40,14 @@ logger:
   logs:
     sensor: INFO
     adc: INFO
+    wifi: INFO
     mqtt: INFO
+    app: INFO
+    uart.arduino_esp8266: INFO
+    wifi_esp8266: INFO
+    mdns: INFO
+
+
 #    landys_gyr: INFO
 
 # Enable Home Assistant API

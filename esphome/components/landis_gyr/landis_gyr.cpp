@@ -4,6 +4,8 @@
 #include <AES.h>
 #include <GCM.h>
 
+#include "dlsmcrc.h"
+
 using namespace esphome::landis_gyr;
 
 static const char *const TAG = "landys_gyr";
@@ -20,67 +22,84 @@ uint32_t bigToLittleEndian(uint32_t value)
          ((value >> 24) & 0xFF);
 }
 
+uint16_t bigToLittleEndian(uint16_t value)
+//***************************************************************************************
+{
+  return ((value & 0xFF) << 8) | ((value >> 8) & 0xFF);
+}
+
 void LandysGyrReader::setup()
 //***************************************************************************************
 {
   this->message_ = new char[this->max_message_len_];
 }
-/*
-void LandysGyrReader::loop()
-{
- int block = 0, beg = 0;
-
-  while ((block = available()))
-  {
-     for (int i = 0; i < block; ++i)
-    {
-      uint8_t b = read();
-      //yield();
-
-      if (0xdb == b)
-      {
-        if (pos_>0)
-        {
-          ESP_LOGD(TAG, "Message ==========================");
-          logMessage(pos_);
-        }
-
-        pos_ = 0;
-      }
-
-      message_[pos_++] = b;
-
-      pos_ = (pos_ >= max_message_len_) ? 0 : pos_;
-    }
-  }
-}
-*/
 
 void LandysGyrReader::loop()
 //***************************************************************************************
 {
+  if (EXPECTED_TOTAL_MESSAGE_LENGTH >= Serial.available())
+  {
+    readSerial();
+  }
+}
+
+void LandysGyrReader::readSerial()
+//***************************************************************************************
+{
   int block = 0;
   static int beg;
+  static uint8_t lastByte = 0x00;
 
   while ((block = available()))
   {
-    ESP_LOGI(TAG, "New block of data at %u", pos_);
+    ESP_LOGV(TAG, "New block of data of %u bytes", block);
     for (int i = 0; i < block; ++i)
     {
       uint8_t b = read();
-      //yield();
+      // yield();
 
       switch (state_)
       {
+
       case ParseState::NONE:
-        if (0xdb == b)
+        if ((0xa0 == b) && (0x7e == lastByte))
         {
-          ctx_ = EMPTY_CONTEXT;
-          state_ = ParseState::SYSNAME_SIZE;
+          ESP_LOGV(TAG, "Starting new block pos was %u", pos_);
+          state_ = ParseState::SIZE;
           pos_ = 0;
-          beg = 0;
-          for(i=0;i<max_message_len_;++i) message_[i] = 0;
-          ESP_LOGV(TAG, "STEP00: Started Reading a telegram!");
+
+          for (i = 0; i < max_message_len_; ++i)
+            message_[i] = 0;
+
+          ctx_ = EMPTY_CONTEXT;
+          message_[pos_++] = 0x7e;
+          beg = 1;
+        }
+        break;
+
+      case ParseState::SIZE:
+      {
+        ctx_.messageLength = b;
+        ESP_LOGV(TAG, "Size of message %u", ctx_.messageLength);
+        next_parse_pos_ = pos_ + HEAD_LENGTH;
+        state_ = ParseState::TELEGRAM;
+      }
+      break;
+
+      case ParseState::TELEGRAM:
+        if (pos_ == next_parse_pos_)
+        {
+          if (0xdb == b)
+          {
+            state_ = ParseState::SYSNAME_SIZE;
+            ctx_.telegramStart = pos_;
+            ESP_LOGV(TAG, "STEP00: Started Reading a telegram!");
+          }
+          else
+          {
+            ESP_LOGE(TAG, "Wrong start for Telegram expected 0xDB got %02x", b);
+            state_ = ParseState::ERROR;
+          }
         }
         break;
 
@@ -103,8 +122,8 @@ void LandysGyrReader::loop()
           memcpy(ctx_.iv, message_ + beg, pos_ - beg);
           ctx_.iv[pos_ - beg] = b; // we are at the position of the last byte so add it extra
           state_ = ParseState::FRAMETYPE;
+          ESP_LOGV(TAG, "STEP02: System Name Read!");
         }
-        ESP_LOGV(TAG, "STEP02: System Name Read!");
         break;
 
       case ParseState::FRAMETYPE:
@@ -141,57 +160,54 @@ void LandysGyrReader::loop()
           ctx_.cipherStart = pos_ + 1;
           state_ = ParseState::CIPHER;
           ESP_LOGV(TAG, "STEP05: FrameID = %u", ctx_.frameid);
+          logMessage(pos_, 0, false);
         }
         break;
 
       case ParseState::CIPHER:
         if (pos_ == next_parse_pos_)
         {
-          state_ = ParseState::TAIL;
+          state_ = ParseState::CRC;
           next_parse_pos_ = pos_ + TAIL_LENGTH;
-          beg = pos_ + 1;
+          beg = pos_;
           ctx_.cipherEnd = beg;
-          ESP_LOGV(TAG, "STEP06: Cypher from %u to %u", ctx_.cipherStart, ctx_.cipherEnd);
+          ESP_LOGV(TAG, "STEP06: Cypher from %u to %u - last: %02x ", ctx_.cipherStart, ctx_.cipherEnd - 1, message_[pos_ - 1]);
+
+          logMessage(pos_, 0);
         }
         break;
 
-      case ParseState::TAIL:
+      case ParseState::CRC:
         if (pos_ == next_parse_pos_)
         {
-          memcpy(ctx_.tail, message_ + beg, pos_ - beg);
-          ctx_.tail[pos_ - beg] = b; // we are at the position of the last byte so add it extra
-          state_ = ParseState::COMPLETE;
-          ESP_LOGV(TAG, "STEP07: Tail read");
+          memcpy(&ctx_.crc, message_ + beg, 2);
+          //ctx_.crc = bigToLittleEndian(ctx_.crc);
+          if (0x7e == b)
+          {
+            DlmsCRC crc;
+            crc.update(message_ + 1, pos_ - 3);
+            uint16_t hcrc = crc.getResult();
+            ESP_LOGV(TAG, "CRC msg = %02x %02x", hcrc >> 8, hcrc & 0xFF);
+
+            if (ctx_.crc != hcrc)
+            {
+              state_ = ParseState::ERROR;
+              ESP_LOGW(TAG, "Skipping message: CRC received = 0x%02x%02x CRC calculated from message = 0x%02x%02x", ctx_.crc >> 8, ctx_.crc & 0xFF, hcrc >> 8, hcrc & 0xFF);
+            }
+            else
+            {
+              processTelegram();
+              state_ = ParseState::NONE;
+            }
+          }
+
+          else
+          {
+            ESP_LOGE(TAG, "Invalid end of message = %02x!", b);
+            state_ = ParseState::ERROR;
+          }
         }
         break;
-
-      case ParseState::COMPLETE:
-        if (0x00 != b)
-        {
-          ESP_LOGE(TAG, "Invalid end of message!");
-          state_ = ParseState::ERROR;
-          break;
-        }
-        logContext();
-        state_ = ParseState::NONE;
-        ESP_LOGV(TAG, "STEP08: All loaded");
-        ESP_LOGD(TAG, "Encrypted message: ============");
-          logMessage(pos_, 0, true);
-
-        decryptCypher();
-        {
-          if (!validateMessage())
-          {
-            state_ = ParseState::ERROR;
-            break;
-          }
-          float econsumed = parseMessage();
-          ESP_LOGD(TAG, "Read frameID: %u energy = %.2f", bigToLittleEndian(ctx_.frameid), econsumed);
-          ESP_LOGD(TAG, "Correct message: ============");
-          logMessage(pos_, 0, true);
-          //delay(100);
-          break;
-        }
 
       case ParseState::ERROR:
         // should net be reached
@@ -207,15 +223,37 @@ void LandysGyrReader::loop()
       {
         state_ = ParseState::NONE;
         ESP_LOGD(TAG, "Wrong message: ============");
-        logMessage(pos_,0,true);
+        logMessage(pos_, 0, true);
         pos_ = 0;
       }
       else if (ParseState::NONE != state_)
       {
         message_[pos_++] = b;
       }
+
+      lastByte = b;
     }
   }
+}
+
+void LandysGyrReader::processTelegram()
+//***************************************************************************************
+{
+  logContext();
+  state_ = ParseState::NONE;
+
+  decryptCypher();
+
+  if (!validateMessage())
+  {
+    state_ = ParseState::ERROR;
+  }
+  
+  float econsumed = parseMessage();
+  ESP_LOGD(TAG, "Read frameID: %u energy = %.2f", bigToLittleEndian(ctx_.frameid), econsumed);
+  ESP_LOGV(TAG, "Correct message: ============");
+  logMessage(pos_, 0, false);
+  // delay(100);
 }
 
 void LandysGyrReader::dump_config()
@@ -288,7 +326,7 @@ bool LandysGyrReader::decryptCypher()
   gcmaes128 = new GCM<AES128>();
   gcmaes128->setKey(decryption_key_.data(), decryption_key_.size());
   gcmaes128->setIV((const uint8_t *)ctx_.iv, IV_LENGTH);
-  gcmaes128->decrypt((uint8_t *)(message_ + ctx_.cipherStart), (uint8_t *)(message_ + ctx_.cipherStart), ctx_.cipherEnd - ctx_.cipherStart);
+  gcmaes128->decrypt((uint8_t *)(message_ + ctx_.cipherStart), (uint8_t *)(message_ + ctx_.cipherStart), ctx_.cipherEnd - ctx_.cipherStart + 2);
   delete gcmaes128;
   return true;
 }
@@ -303,7 +341,7 @@ bool LandysGyrReader::validateMessage()
   p++;
   uint32_t decrypted_frame_id;
   std::memcpy(&decrypted_frame_id, p, sizeof(uint32_t));
-  //yield();
+  // yield();
 
   if (ctx_.frameid != decrypted_frame_id)
   {
@@ -323,7 +361,7 @@ bool LandysGyrReader::validateMessage()
       return false;
     }
     p++;
-    //yield();
+    // yield();
   }
 
   // check if the separators 0x06 are where they should be
@@ -337,7 +375,7 @@ bool LandysGyrReader::validateMessage()
       return false;
     }
     p += 5;
-    //yield();
+    // yield();
   }
 
   return true;
@@ -377,7 +415,6 @@ float LandysGyrReader::readValue(esphome::sensor::Sensor *sensor, uint8_t start,
 float LandysGyrReader::parseMessage()
 //***************************************************************************************
 {
-  // logMessage();
   float result = 0;
   result = readValue(energy_sensor_, ENERGY_CONSUMPTION_TOTAL_START, 1000.0, "Energy consumption total");
   readValue(power_sensor_, CURRENT_POWER_USAGE_START, 1.0, "Current Power Usage");
@@ -393,7 +430,8 @@ void LandysGyrReader::logMessage(size_t len, size_t begin, bool debug)
 
   for (size_t i = begin; i < (len + begin); ++i)
   {
-    sprintf(row + ((i % 16) * 3), "%02x ", message_[i]);
+    char c = message_[i];
+    sprintf(row + ((i % 16) * 3), "%02x ", c);
 
     if (0 == (i + 1) % 16)
     {
@@ -406,7 +444,7 @@ void LandysGyrReader::logMessage(size_t len, size_t begin, bool debug)
         ESP_LOGV(TAG, "%04d : %s", f++, row);
       }
 
-      //yield();
+      // yield();
     }
   }
 
@@ -430,14 +468,9 @@ void LandysGyrReader::logContext()
     sprintf(hexstr + ((i % 16) * 3), "%02x ", ctx_.iv[i]);
   }
   ESP_LOGV(TAG, "IV   = %s", hexstr);
-  //yield();
+  // yield();
 
-  for (int i = 0; i < TAIL_LENGTH; ++i)
-  {
-    sprintf(hexstr + ((i % 16) * 3), "%02x ", ctx_.tail[i]);
-  }
-  ESP_LOGV(TAG, "TAIL = %s", hexstr);
-  //yield();
+  ESP_LOGV(TAG, "CRC = %04d", ctx_.crc);
 
-  logMessage(pos_ - ctx_.cipherStart - TAIL_LENGTH, ctx_.cipherStart);
+  logMessage(pos_ - ctx_.cipherStart - TAIL_LENGTH, ctx_.cipherStart, false);
 }
