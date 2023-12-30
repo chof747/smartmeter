@@ -47,7 +47,7 @@ void LandysGyrReader::readSerial()
 //***************************************************************************************
 {
   int block = 0;
-  static int beg;
+  static u_int16_t beg;
   static uint8_t lastByte = 0x00;
 
   while ((block = available()))
@@ -56,7 +56,7 @@ void LandysGyrReader::readSerial()
     for (int i = 0; i < block; ++i)
     {
       uint8_t b = read();
-      // yield();
+      yield();
 
       switch (state_)
       {
@@ -64,87 +64,36 @@ void LandysGyrReader::readSerial()
       case ParseState::NONE:
         if ((0xa0 == b) && (0x7e == lastByte))
         {
-          ESP_LOGV(TAG, "Starting new block pos was %u", pos_);
-          state_ = ParseState::SIZE;
-          pos_ = 0;
-
-          for (i = 0; i < max_message_len_; ++i)
-            message_[i] = 0;
-
-          ctx_ = EMPTY_CONTEXT;
-          message_[pos_++] = 0x7e;
-          beg = 1;
+          startReadingTelegram();
         }
         break;
 
       case ParseState::SIZE:
-      {
-        ctx_.messageLength = b;
-        ESP_LOGV(TAG, "Size of message %u", ctx_.messageLength);
-        next_parse_pos_ = pos_ + HEAD_LENGTH;
-        state_ = ParseState::TELEGRAM;
-      }
-      break;
+        readMessageSize(b);
+        break;
 
       case ParseState::TELEGRAM:
         if (pos_ == next_parse_pos_)
         {
-          if (0xdb == b)
-          {
-            state_ = ParseState::SYSNAME_SIZE;
-            ctx_.telegramStart = pos_;
-            ESP_LOGV(TAG, "STEP00: Started Reading a telegram!");
-          }
-          else
-          {
-            ESP_LOGE(TAG, "Wrong start for Telegram expected 0xDB got %02x", b);
-            state_ = ParseState::ERROR;
-          }
+          startReadingFrame(b);
         }
         break;
 
       case ParseState::SYSNAME_SIZE:
-        if (SYSTEM_NAME_MAX_CNT < b)
-        {
-          ESP_LOGE(TAG, "Wrong size for system name received %d instead of max %d", b, SYSTEM_NAME_MAX_CNT);
-          state_ = ParseState::ERROR;
-          break;
-        }
-        next_parse_pos_ = pos_ + b;
-        beg = pos_ + 1;
-        state_ = ParseState::SYSNAME;
-        ESP_LOGV(TAG, "STEP01: System Name Size = %d", b);
+        beg = readSystemNameSize(b);
         break;
 
       case ParseState::SYSNAME:
         if (pos_ == next_parse_pos_)
-        {
-          memcpy(ctx_.iv, message_ + beg, pos_ - beg);
-          ctx_.iv[pos_ - beg] = b; // we are at the position of the last byte so add it extra
-          state_ = ParseState::FRAMETYPE;
-          ESP_LOGV(TAG, "STEP02: System Name Read!");
-        }
+          readSystemName(beg, b);
         break;
 
       case ParseState::FRAMETYPE:
-        if (0x4f != b)
-        {
-          ESP_LOGE(TAG, "Invalid message block received, frametype not 4F but %02x!", b);
-          state_ = ParseState::ERROR;
-          break;
-        }
-
-        ESP_LOGV(TAG, "STEP03: Frame type confirmed!");
-        state_ = ParseState::SECFLAG;
+        checkFrameType(b);
         break;
 
       case ParseState::SECFLAG:
-        ctx_.secFlg = (0x10 != b);
-
-        state_ = ParseState::FRAMEID;
-        next_parse_pos_ = pos_ + FRAMEID_LENGTH;
-        beg = pos_ + 1;
-        ESP_LOGV(TAG, "STEP04: Secflag = %d", ctx_.secFlg);
+        beg = checkSecurityFlag(b);
         break;
 
       case ParseState::FRAMEID:
@@ -181,26 +130,11 @@ void LandysGyrReader::readSerial()
         if (pos_ == next_parse_pos_)
         {
           memcpy(&ctx_.crc, message_ + beg, 2);
-          //ctx_.crc = bigToLittleEndian(ctx_.crc);
+          // ctx_.crc = bigToLittleEndian(ctx_.crc);
           if (0x7e == b)
           {
-            DlmsCRC crc;
-            crc.update(message_ + 1, pos_ - 3);
-            uint16_t hcrc = crc.getResult();
-            ESP_LOGV(TAG, "CRC msg = %02x %02x", hcrc >> 8, hcrc & 0xFF);
-
-            if (ctx_.crc != hcrc)
-            {
-              state_ = ParseState::ERROR;
-              ESP_LOGW(TAG, "Skipping message: CRC received = 0x%02x%02x CRC calculated from message = 0x%02x%02x", ctx_.crc >> 8, ctx_.crc & 0xFF, hcrc >> 8, hcrc & 0xFF);
-            }
-            else
-            {
-              processTelegram();
-              state_ = ParseState::NONE;
-            }
+            checkCRC();
           }
-
           else
           {
             ESP_LOGE(TAG, "Invalid end of message = %02x!", b);
@@ -236,6 +170,121 @@ void LandysGyrReader::readSerial()
   }
 }
 
+uint16_t esphome::landis_gyr::LandysGyrReader::checkSecurityFlag(uint8_t b)
+//***************************************************************************************
+{
+  ctx_.secFlg = (0x10 != b);
+
+  state_ = ParseState::FRAMEID;
+  next_parse_pos_ = pos_ + FRAMEID_LENGTH;
+  ESP_LOGV(TAG, "STEP04: Secflag = %d", ctx_.secFlg);
+  return pos_ + 1;
+}
+
+void esphome::landis_gyr::LandysGyrReader::checkFrameType(uint8_t b)
+//***************************************************************************************
+{
+  if (0x4f != b)
+  {
+    ESP_LOGE(TAG, "Invalid message block received, frametype not 4F but %02x!", b);
+    state_ = ParseState::ERROR;
+  }
+
+  state_ = ParseState::SECFLAG;
+}
+
+void esphome::landis_gyr::LandysGyrReader::readSystemName(u_int16_t beg, uint8_t b)
+//***************************************************************************************
+{
+  memcpy(ctx_.iv, message_ + beg, pos_ - beg);
+  ctx_.iv[pos_ - beg] = b; // we are at the position of the last byte so add it extra
+  state_ = ParseState::FRAMETYPE;
+  ESP_LOGV(TAG, "STEP02: System Name Read!");
+}
+
+uint16_t esphome::landis_gyr::LandysGyrReader::readSystemNameSize(uint8_t b)
+//***************************************************************************************
+{
+
+  if (SYSTEM_NAME_MAX_CNT < b)
+  {
+    ESP_LOGE(TAG, "Wrong size for system name received %d instead of max %d", b, SYSTEM_NAME_MAX_CNT);
+    state_ = ParseState::ERROR;
+    return 0;
+  };
+
+  next_parse_pos_ = pos_ + b;
+  state_ = ParseState::SYSNAME;
+
+  ESP_LOGV(TAG, "STEP01: System Name Size = %d", b);
+
+  return pos_ + 1;
+}
+
+void esphome::landis_gyr::LandysGyrReader::startReadingFrame(uint8_t b)
+//***************************************************************************************
+{
+  {
+    if (0xdb == b)
+    {
+      state_ = ParseState::SYSNAME_SIZE;
+      ctx_.telegramStart = pos_;
+      ESP_LOGV(TAG, "STEP00: Started Reading a telegram!");
+    }
+    else
+    {
+      ESP_LOGE(TAG, "Wrong start for Telegram expected 0xDB got %02x", b);
+      state_ = ParseState::ERROR;
+    }
+  }
+}
+
+void esphome::landis_gyr::LandysGyrReader::readMessageSize(uint8_t b)
+//***************************************************************************************
+{
+  {
+    ctx_.messageLength = b;
+    ESP_LOGV(TAG, "Size of message %u", ctx_.messageLength);
+    next_parse_pos_ = pos_ + HEAD_LENGTH;
+    state_ = ParseState::TELEGRAM;
+  }
+}
+
+void LandysGyrReader::startReadingTelegram()
+//***************************************************************************************
+{
+  state_ = ParseState::SIZE;
+  pos_ = 0;
+
+  for (int i = 0; i < max_message_len_; ++i)
+    message_[i] = 0;
+
+  ctx_ = EMPTY_CONTEXT;
+  message_[pos_++] = 0x7e;
+
+  ESP_LOGV(TAG, "Starting new block pos was %u", pos_);
+}
+
+void LandysGyrReader::checkCRC()
+//***************************************************************************************
+{
+  DlmsCRC crc;
+  crc.update(message_ + 1, pos_ - 3);
+  uint16_t hcrc = crc.getResult();
+  ESP_LOGV(TAG, "CRC msg = %02x %02x", hcrc >> 8, hcrc & 0xFF);
+
+  if (ctx_.crc != hcrc)
+  {
+    state_ = ParseState::ERROR;
+    ESP_LOGW(TAG, "Skipping message: CRC received = 0x%02x%02x CRC calculated from message = 0x%02x%02x", ctx_.crc >> 8, ctx_.crc & 0xFF, hcrc >> 8, hcrc & 0xFF);
+  }
+  else
+  {
+    processTelegram();
+    state_ = ParseState::NONE;
+  }
+}
+
 void LandysGyrReader::processTelegram()
 //***************************************************************************************
 {
@@ -248,7 +297,7 @@ void LandysGyrReader::processTelegram()
   {
     state_ = ParseState::ERROR;
   }
-  
+
   float econsumed = parseMessage();
   ESP_LOGD(TAG, "Read frameID: %u energy = %.2f", bigToLittleEndian(ctx_.frameid), econsumed);
   ESP_LOGV(TAG, "Correct message: ============");

@@ -69,14 +69,26 @@ namespace esphome
       void deleteMessage();
 
       void readSerial();
-      float readValue(esphome::sensor::Sensor *sensor, uint8_t pos, float factor, const char* sensor_name = "");
-      float readValue(esphome::sensor::Sensor *sensor, uint8_t pos, float factor, float offset, const char* sensor_name = "");
+      uint16_t checkSecurityFlag(uint8_t b);
+      void checkFrameType(uint8_t b);
+      void readMessageSize(uint8_t b);
+      void startReadingFrame(uint8_t b);
+      void checkCRC();
+      void startReadingTelegram();
+      uint16_t readSystemNameSize(uint8_t b);
+      void readSystemName(u_int16_t beg, uint8_t b);
+      
       void processTelegram();
       float parseMessage();
       bool decryptCypher();
       bool validateMessage();
+
+      float readValue(esphome::sensor::Sensor *sensor, uint8_t pos, float factor, const char* sensor_name = "");
+      float readValue(esphome::sensor::Sensor *sensor, uint8_t pos, float factor, float offset, const char* sensor_name = "");
+
       void logMessage(size_t len, size_t begin = 0, bool debug=false);
       void logContext();
+
 
       size_t pos_=0;
       size_t next_parse_pos_=0;
