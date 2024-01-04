@@ -41,6 +41,11 @@ void LandysGyrReader::loop()
   {
     readSerial();
   }
+  else
+  {
+    ESP_LOGW(TAG, "Serial buffer overrun resetting");
+    Serial.flush();
+  }
 }
 
 void LandysGyrReader::readSerial()

@@ -41,7 +41,7 @@ logger:
     sensor: INFO
     adc: INFO
     mqtt: INFO
-    landys_gyr: INFO
+    landys_gyr: DEBUG
 
 # Enable Home Assistant API
 api:
