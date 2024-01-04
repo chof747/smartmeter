@@ -16,6 +16,13 @@ from esphome.const import (
 DEPENDENCIES = [ 'uart' ]
 SMART_METER_DECRYPTION_KEY = 'meter_key'
 MAX_MESSAGE_LENGTH = 'max_message_length'
+CONF_POWEROUT = 'powerout'
+CONF_ENERGYOUT = 'energyout'
+CONF_BLINDENERGYIN = 'blindenergyin'
+CONF_BLINDENERGYOUT = 'blindenergyout'
+CONF_BLINDPOWERIN = 'blindpowerin'
+CONF_BLINDPOWEROUT = 'blindpowerout'
+
 
 SENSOR_BEGIN_POS = 'begin_pos'
 
@@ -35,7 +42,43 @@ CONFIG_SCHEMA = (
         device_class=DEVICE_CLASS_ENERGY,
         state_class=STATE_CLASS_TOTAL_INCREASING
       ),
+      cv.Optional(CONF_ENERGYOUT): sensor.sensor_schema(
+        unit_of_measurement=UNIT_KILOWATT_HOURS,
+        accuracy_decimals=3,
+        device_class=DEVICE_CLASS_ENERGY,
+        state_class=STATE_CLASS_TOTAL_INCREASING
+      ),
+      cv.Optional(CONF_BLINDENERGYIN): sensor.sensor_schema(
+        unit_of_measurement=UNIT_KILOWATT_HOURS,
+        accuracy_decimals=3,
+        device_class=DEVICE_CLASS_ENERGY,
+        state_class=STATE_CLASS_TOTAL_INCREASING
+      ),
+      cv.Optional(CONF_BLINDENERGYOUT): sensor.sensor_schema(
+        unit_of_measurement=UNIT_KILOWATT_HOURS,
+        accuracy_decimals=3,
+        device_class=DEVICE_CLASS_ENERGY,
+        state_class=STATE_CLASS_TOTAL_INCREASING
+      ),
       cv.Optional(CONF_POWER): sensor.sensor_schema(
+        unit_of_measurement=UNIT_WATT,
+        accuracy_decimals=0,
+        device_class=DEVICE_CLASS_POWER,
+        state_class=STATE_CLASS_MEASUREMENT
+      ),
+      cv.Optional(CONF_POWEROUT): sensor.sensor_schema(
+        unit_of_measurement=UNIT_WATT,
+        accuracy_decimals=0,
+        device_class=DEVICE_CLASS_POWER,
+        state_class=STATE_CLASS_MEASUREMENT
+      ),
+      cv.Optional(CONF_BLINDPOWERIN): sensor.sensor_schema(
+        unit_of_measurement=UNIT_WATT,
+        accuracy_decimals=0,
+        device_class=DEVICE_CLASS_POWER,
+        state_class=STATE_CLASS_MEASUREMENT
+      ),
+      cv.Optional(CONF_BLINDPOWEROUT): sensor.sensor_schema(
         unit_of_measurement=UNIT_WATT,
         accuracy_decimals=0,
         device_class=DEVICE_CLASS_POWER,
@@ -56,9 +99,33 @@ async def to_code(config):
     sens = await sensor.new_sensor(config[CONF_ENERGY])
     cg.add(var.set_energy_sensor(sens))
 
+  if (CONF_ENERGYOUT in config):
+    sens = await sensor.new_sensor(config[CONF_ENERGYOUT])
+    cg.add(var.set_energyout_sensor(sens))
+
+  if (CONF_BLINDENERGYIN in config):
+    sens = await sensor.new_sensor(config[CONF_BLINDENERGYIN])
+    cg.add(var.set_blindenergyin_sensor(sens))
+
+  if (CONF_BLINDENERGYOUT in config):
+    sens = await sensor.new_sensor(config[CONF_BLINDENERGYOUT])
+    cg.add(var.set_blindenergyout_sensor(sens))
+
   if (CONF_POWER in config):
     sens = await sensor.new_sensor(config[CONF_POWER])
     cg.add(var.set_power_sensor(sens))
+
+  if (CONF_POWEROUT in config):
+    sens = await sensor.new_sensor(config[CONF_POWEROUT])
+    cg.add(var.set_powerout_sensor(sens))
+
+  if (CONF_BLINDPOWERIN in config):
+    sens = await sensor.new_sensor(config[CONF_BLINDPOWERIN])
+    cg.add(var.set_blindpowerin_sensor(sens))
+
+  if (CONF_BLINDPOWEROUT in config):
+    sens = await sensor.new_sensor(config[CONF_BLINDPOWEROUT])
+    cg.add(var.set_blindpowerout_sensor(sens))
 
   if (SMART_METER_DECRYPTION_KEY in config):
     cg.add(var.set_smartmeter_decryption_key(config[SMART_METER_DECRYPTION_KEY]))

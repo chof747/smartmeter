@@ -466,7 +466,13 @@ float LandysGyrReader::parseMessage()
 {
   float result = 0;
   result = readValue(energy_sensor_, ENERGY_CONSUMPTION_TOTAL_START, 1000.0, "Energy consumption total");
+  readValue(energyout_sensor_, ENERGY_PRODUCTION_TOTAL_START, 1000.0, "Energy Out");
   readValue(power_sensor_, CURRENT_POWER_USAGE_START, 1.0, "Current Power Usage");
+  readValue(powerout_sensor_, CURRENT_POWER_PRODUCED_START, 1.0, "Power Out");
+  readValue(blindenergyin_sensor_, BLIND_ENERGY_CONSUMPTION_TOTAL_START, 1000.0, "Blind Energy In");
+  readValue(blindenergyout_sensor_, BLIND_ENERGY_GENERATED_TOTAL_START, 1000.0, "Blind Energy Out");
+  readValue(blindpowerin_sensor_, CURRENT_BLINDPOWERIN_START, 1.0, "Current Blindpower Consumption");
+  readValue(blindpowerout_sensor_, CURRENT_BLINDPOWEROUT_START, 1.0, "Current Blindpower Generation");
 
   return result;
 }

@@ -70,8 +70,20 @@ sensor:
     max_message_length: 255
     energy:
       name: "Energieverbrauch total"
+    energyout:
+      name: "Energieproduktion total"
     power: 
       name: "Aktuelle Leistung"
+    powerout:
+      name: "Aktuell erzeugte Leistung"
+    blindenergyin:
+      name: "Blindenergie konsumiert total"
+    blindenergyout:
+      name: "Blindenergie generiert total"
+    blindpowerin:
+      name: "Aktuelle konsumierte Blindleistung"
+    blindpowerout:
+      name: "Aktuelle generierte Blindleistung"
       
 
 uart:
