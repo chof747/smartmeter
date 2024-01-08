@@ -62,6 +62,9 @@ namespace esphome
       void set_blindenergyout_sensor(sensor::Sensor *blindenergyout_sensor) { this->blindenergyout_sensor_ = blindenergyout_sensor; }
       void set_blindpowerin_sensor(sensor::Sensor *blindpowerin_sensor) { this->blindpowerin_sensor_ = blindpowerin_sensor; }
       void set_blindpowerout_sensor(sensor::Sensor *blindpowerout_sensor) { this->blindpowerout_sensor_ = blindpowerout_sensor; }
+       void set_telegram_count_sensor(sensor::Sensor *sensor) { telegram_count_sensor_ = sensor; }
+
+      uint16_t getTelegramCountOverLastHour();
 
     protected:
       std::vector<uint8_t> decryption_key_{};
@@ -76,6 +79,7 @@ namespace esphome
       sensor::Sensor *blindenergyout_sensor_{nullptr};
       sensor::Sensor *blindpowerin_sensor_{nullptr};
       sensor::Sensor *blindpowerout_sensor_{nullptr};
+      sensor::Sensor *telegram_count_sensor_{nullptr};
 
     private:
       enum ParseState
@@ -115,6 +119,8 @@ namespace esphome
       float readValue(esphome::sensor::Sensor *sensor, uint8_t pos, float factor, const char *sensor_name = "");
       float readValue(esphome::sensor::Sensor *sensor, uint8_t pos, float factor, float offset, const char *sensor_name = "");
 
+      void updateTelegramCounter();
+
       void logMessage(size_t len, size_t begin = 0, bool debug = false);
       void logContext();
 
@@ -122,6 +128,9 @@ namespace esphome
       size_t next_parse_pos_ = 0;
       ParseState state_ = ParseState::NONE;
       ParseContext ctx_;
+      std::array<uint16_t, 60> telegrams_received_{};
+      size_t rix_ = 0;
+      uint32_t lastminute_update_ = 0;
     };
 
   } // namespace: landis_gyr

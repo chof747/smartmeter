@@ -46,6 +46,53 @@ void LandysGyrReader::loop()
     ESP_LOGW(TAG, "Serial buffer overrun resetting");
     Serial.flush();
   }
+  updateTelegramCounter();
+}
+
+void LandysGyrReader::dump_config()
+//***************************************************************************************
+{
+  ESP_LOGCONFIG(TAG, "Landis-Gyr Smart Meter:");
+  ESP_LOGCONFIG(TAG, "  Maximum message length: %d", this->max_message_len_);
+  ESP_LOGCONFIG(TAG, "  Decryption is %sactivated", (0 == this->decryption_key_.size()) ? "de" : "");
+}
+
+void LandysGyrReader::set_smartmeter_decryption_key(const std::string decryption_key)
+//***************************************************************************************
+{
+  if (decryption_key.length() == 0)
+  {
+    DISABLE_ENCRYPTION();
+  }
+
+  if (decryption_key.length() != 32)
+  {
+    ESP_LOGE(TAG, "Error, decryption key must be 32 character long");
+    return;
+  }
+
+  this->decryption_key_.clear();
+
+  ESP_LOGI(TAG, "Decryption is activated");
+  // Verbose level prints decryption key
+  ESP_LOGV(TAG, "Using key for message decryption: %s", decryption_key.c_str());
+
+  if (!parseDecryptionKey(decryption_key))
+  {
+    DISABLE_ENCRYPTION();
+    return;
+  }
+}
+
+uint16_t LandysGyrReader::getTelegramCountOverLastHour()
+//***************************************************************************************
+{
+  uint16_t sum = 0;
+  for (uint16_t count : telegrams_received_)
+  {
+    sum += count;
+  }
+  return sum;
 }
 
 void LandysGyrReader::readSerial()
@@ -267,6 +314,7 @@ void LandysGyrReader::startReadingTelegram()
   ctx_ = EMPTY_CONTEXT;
   message_[pos_++] = 0x7e;
 
+  telegrams_received_[rix_]++;
   ESP_LOGV(TAG, "Starting new block pos was %u", pos_);
 }
 
@@ -308,41 +356,6 @@ void LandysGyrReader::processTelegram()
   ESP_LOGV(TAG, "Correct message: ============");
   logMessage(pos_, 0, false);
   // delay(100);
-}
-
-void LandysGyrReader::dump_config()
-//***************************************************************************************
-{
-  ESP_LOGCONFIG(TAG, "Landis-Gyr Smart Meter:");
-  ESP_LOGCONFIG(TAG, "  Maximum message length: %d", this->max_message_len_);
-  ESP_LOGCONFIG(TAG, "  Decryption is %sactivated", (0 == this->decryption_key_.size()) ? "de" : "");
-}
-
-void LandysGyrReader::set_smartmeter_decryption_key(const std::string decryption_key)
-//***************************************************************************************
-{
-  if (decryption_key.length() == 0)
-  {
-    DISABLE_ENCRYPTION();
-  }
-
-  if (decryption_key.length() != 32)
-  {
-    ESP_LOGE(TAG, "Error, decryption key must be 32 character long");
-    return;
-  }
-
-  this->decryption_key_.clear();
-
-  ESP_LOGI(TAG, "Decryption is activated");
-  // Verbose level prints decryption key
-  ESP_LOGV(TAG, "Using key for message decryption: %s", decryption_key.c_str());
-
-  if (!parseDecryptionKey(decryption_key))
-  {
-    DISABLE_ENCRYPTION();
-    return;
-  }
 }
 
 bool LandysGyrReader::parseDecryptionKey(const std::string key)
@@ -463,6 +476,22 @@ float LandysGyrReader::readValue(esphome::sensor::Sensor *sensor, uint8_t start,
   else
   {
     return 0;
+  }
+}
+
+void LandysGyrReader::updateTelegramCounter()
+//***************************************************************************************
+{
+  uint32_t t = millis();
+  if (t - lastminute_update_ >= 60000)
+  {
+    rix_ = (rix_ + 1) % 60;        // Move to the next bucket
+    telegrams_received_[rix_] = 0; // Reset the count for the new current minute
+    lastminute_update_ = t;
+
+     if (telegram_count_sensor_ != nullptr) {
+        telegram_count_sensor_->publish_state(getTelegramCountOverLastHour());
+    }
   }
 }
 

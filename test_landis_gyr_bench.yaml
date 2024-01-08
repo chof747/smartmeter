@@ -84,6 +84,8 @@ sensor:
       name: "Aktuelle konsumierte Blindleistung"
     blindpowerout:
       name: "Aktuelle generierte Blindleistung"
+    telegramcount_lasthour:
+      name: "Telegrams in last hour"
       
 
 uart:
