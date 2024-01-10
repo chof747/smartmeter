@@ -46,7 +46,7 @@ void LandysGyrReader::loop()
     ESP_LOGW(TAG, "Serial buffer overrun resetting");
     Serial.flush();
   }
-  updateTelegramCounter();
+  updateCounters();
 }
 
 void LandysGyrReader::dump_config()
@@ -95,6 +95,17 @@ uint16_t LandysGyrReader::getTelegramCountOverLastHour()
   return sum;
 }
 
+uint16_t LandysGyrReader::getSerialBlocksCountOverLastHour()
+//***************************************************************************************
+{
+  uint16_t sum = 0;
+  for (uint16_t count : serialblocks_received_)
+  {
+    sum += count;
+  }
+  return sum;
+}
+
 void LandysGyrReader::readSerial()
 //***************************************************************************************
 {
@@ -105,6 +116,13 @@ void LandysGyrReader::readSerial()
   while ((block = available()))
   {
     ESP_LOGV(TAG, "New block of data of %u bytes", block);
+
+    // count block of data if it is not yet part of a telegram
+    if (ParseState::NONE == state_)
+    {
+      serialblocks_received_[rix_]++;
+    }
+
     for (int i = 0; i < block; ++i)
     {
       uint8_t b = read();
@@ -479,19 +497,33 @@ float LandysGyrReader::readValue(esphome::sensor::Sensor *sensor, uint8_t start,
   }
 }
 
-void LandysGyrReader::updateTelegramCounter()
+void LandysGyrReader::updateCounters()
 //***************************************************************************************
 {
   uint32_t t = millis();
+  static uint32_t lu = 0;
+
   if (t - lastminute_update_ >= 60000)
   {
     rix_ = (rix_ + 1) % 60;        // Move to the next bucket
     telegrams_received_[rix_] = 0; // Reset the count for the new current minute
+    serialblocks_received_[rix_] = 0;
     lastminute_update_ = t;
+  }
 
-     if (telegram_count_sensor_ != nullptr) {
-        telegram_count_sensor_->publish_state(getTelegramCountOverLastHour());
+  if (t - lu >= 1000)
+  {
+    if (telegram_count_sensor_ != nullptr)
+    {
+      telegram_count_sensor_->publish_state(getTelegramCountOverLastHour());
     }
+
+    if (serialblocks_count_sensor_ != nullptr)
+    {
+      serialblocks_count_sensor_->publish_state(getSerialBlocksCountOverLastHour());
+    }
+
+    lu = t;
   }
 }
 

@@ -23,6 +23,7 @@ CONF_BLINDENERGYOUT = 'blindenergyout'
 CONF_BLINDPOWERIN = 'blindpowerin'
 CONF_BLINDPOWEROUT = 'blindpowerout'
 CONF_TELEGRAM_COUNT = 'telegramcount_lasthour'
+CONF_SERIALBLOCK_COUNT = 'serialblockcount_lasthour'
 
 
 SENSOR_BEGIN_POS = 'begin_pos'
@@ -90,6 +91,12 @@ CONFIG_SCHEMA = (
         icon="mdi:counter",
         accuracy_decimals=0,
         state_class=STATE_CLASS_MEASUREMENT
+      ),
+      cv.Optional(CONF_SERIALBLOCK_COUNT): sensor.sensor_schema(
+        unit_of_measurement="blocks",
+        icon="mdi:counter",
+        accuracy_decimals=0,
+        state_class=STATE_CLASS_MEASUREMENT
       )
     }
   )
@@ -137,6 +144,10 @@ async def to_code(config):
   if (CONF_TELEGRAM_COUNT in config):
     sens = await sensor.new_sensor(config[CONF_TELEGRAM_COUNT])
     cg.add(var.set_telegram_count_sensor(sens))
+
+  if (CONF_SERIALBLOCK_COUNT in config):
+    sens = await sensor.new_sensor(config[CONF_SERIALBLOCK_COUNT])
+    cg.add(var.set_serialblock_count_sensor(sens))
 
   if (SMART_METER_DECRYPTION_KEY in config):
     cg.add(var.set_smartmeter_decryption_key(config[SMART_METER_DECRYPTION_KEY]))
