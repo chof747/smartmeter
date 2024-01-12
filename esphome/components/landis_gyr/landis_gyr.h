@@ -110,7 +110,7 @@ namespace esphome
       void checkFrameType(uint8_t b);
       void readMessageSize(uint8_t b);
       void startReadingFrame(uint8_t b);
-      void checkCRC();
+      bool checkCRC();
       void startReadingTelegram();
       uint16_t readSystemNameSize(uint8_t b);
       void readSystemName(u_int16_t beg, uint8_t b);

@@ -203,7 +203,10 @@ void LandysGyrReader::readSerial()
           // ctx_.crc = bigToLittleEndian(ctx_.crc);
           if (0x7e == b)
           {
-            checkCRC();
+            if (checkCRC())
+            {
+              processTelegram();
+            }
           }
           else
           {
@@ -336,7 +339,7 @@ void LandysGyrReader::startReadingTelegram()
   ESP_LOGV(TAG, "Starting new block pos was %u", pos_);
 }
 
-void LandysGyrReader::checkCRC()
+bool LandysGyrReader::checkCRC()
 //***************************************************************************************
 {
   DlmsCRC crc;
@@ -348,11 +351,12 @@ void LandysGyrReader::checkCRC()
   {
     state_ = ParseState::ERROR;
     ESP_LOGW(TAG, "Skipping message: CRC received = 0x%02x%02x CRC calculated from message = 0x%02x%02x", ctx_.crc >> 8, ctx_.crc & 0xFF, hcrc >> 8, hcrc & 0xFF);
+    return false;
   }
   else
   {
-    processTelegram();
     state_ = ParseState::NONE;
+    return true;
   }
 }
 
@@ -509,10 +513,7 @@ void LandysGyrReader::updateCounters()
     telegrams_received_[rix_] = 0; // Reset the count for the new current minute
     serialblocks_received_[rix_] = 0;
     lastminute_update_ = t;
-  }
 
-  if (t - lu >= 1000)
-  {
     if (telegram_count_sensor_ != nullptr)
     {
       telegram_count_sensor_->publish_state(getTelegramCountOverLastHour());
